@@ -19,7 +19,7 @@
 
 typedef struct{
   uint8_t nodeID;
-  uint8_t *groupsID;
+  uint8_t groupsID[MAX_GROUPS];
 }init_msg_t;
 
 typedef struct{
@@ -38,13 +38,17 @@ class RF24Wave
     bool requestAssociations();
     bool confirmAssociations();
     void listen();
-    bool checkAssociations(uint8_t ID, uint8_t *groups);
+    bool checkAssociations(init_msg_t *data);
     bool checkGroup(uint8_t ID, uint8_t group);
     void printAssociations();
     void addListAssociations(init_msg_t data);
     uint8_t countGroups(uint8_t *groups);
     void broadcastAssociations(init_msg_t data);
-    bool sendUpdateGroup(uint8_t nodeID, uint8_t groupID, uint8_t *listGroupsID);
+    bool sendUpdateGroup(uint8_t NID, uint8_t GID, uint8_t *listNID);
+    void printNetwork();
+    void printAssociation(init_msg_t data);
+    void printUpdate(update_msg_t data);
+    void addListAssociation(update_msg_t data);
 
   private:
     RF24Mesh& mesh;
@@ -52,9 +56,10 @@ class RF24Wave
     bool associated = false;
     uint8_t nodeID;
     /* Struct to stock different group ID proper to this node */
-    uint8_t *groupsID;
+    uint8_t groupsID[MAX_GROUPS];
     /* Matrix to stock nodeID for each different groupID */
     uint8_t listGroupsID[MAX_GROUPS][MAX_NODE_GROUPS];
+    uint32_t lastTimer;
 };
 
 #endif

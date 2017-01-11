@@ -5,16 +5,25 @@ RF24Wave::RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID, uint8
 mesh(_mesh), network(_network)
 {
   nodeID = NodeID;
+  uint8_t i, length;
+  length = countGroups(groups);
+  for(i=0; i<MAX_GROUPS; i++){
+    groupsID[i] = 0;
+  }
   if(groups != NULL){
-    groupsID = groups;
+    for(i=0; i<length; i++){
+      groupsID[i] = groups[i];
+    }
   }
 };
 
-bool RF24Wave::begin(){
+bool RF24Wave::begin()
+{
   mesh.setNodeID(nodeID);
   nodeID = mesh.getNodeID();
   Serial.println(F("Connecting to the mesh..."));
   mesh.begin();
+  lastTimer = millis();
   /* Loop to init matrix */
   uint8_t i, j;
   for(i=0; i<MAX_GROUPS; i++){
@@ -36,8 +45,12 @@ bool RF24Wave::begin(){
 bool RF24Wave::requestAssociations()
 {
   init_msg_t payload;
+  uint8_t i;
   payload.nodeID = nodeID;
-  payload.groupsID = groupsID;
+  for(i=0; i<MAX_GROUPS; i++){
+    payload.groupsID[i] = groupsID[i];
+  }
+  printAssociation(payload);
   mesh.update();
   if(!mesh.write(&payload, INIT_MSG_T, sizeof(init_msg_t), 0)){
     // If a write fails, check connectivity to the mesh network
@@ -62,19 +75,35 @@ void RF24Wave::listen(){
     network.peek(header);
     switch(header.type){
       case INIT_MSG_T:
-        init_msg_t payload;
-        network.read(header, &payload, sizeof(payload));
-        if(checkAssociations(payload.nodeID, payload.groupsID)){
-          // We send update to all nodes
+        init_msg_t init_payload;
+        network.read(header, &init_payload, sizeof(init_payload));
+        printAssociation(init_payload);
+        if(checkAssociations(&init_payload)){
+          Serial.println(F("[listen] 1"));
+          broadcastAssociations(init_payload);
+          Serial.println(F("[listen] 2"));
+          addListAssociations(init_payload);
+          Serial.println(F("[listen] 3"));
+          printAssociations();
         }
+        break;
+      case UPDATE_MSG_T:
+        update_msg_t update_payload;
+        network.read(header, &update_payload, sizeof(update_payload));
+        printUpdate(update_payload);
+        addListAssociation(update_payload);
+        printAssociations();
+        break;
       default:
         break;
     }
   }
 }
 
-bool RF24Wave::confirmAssociations(){
+bool RF24Wave::confirmAssociations()
+{
   bool available = true;
+  associated = false;
   uint8_t i = 0;
   uint8_t length = 0;
   while(!associated){
@@ -84,7 +113,7 @@ bool RF24Wave::confirmAssociations(){
       network.peek(header);
       switch(header.type){
         case ACK_INIT_MSG_T:
-          Serial.println(F("[confirmAssociations] INFO ACK_INIT_MSG_T BEGIN"));
+          //Serial.println(F("[confirmAssociations] INFO ACK_INIT_MSG_T BEGIN"));
           init_msg_t payload;
           network.read(header, &payload, sizeof(payload));
           if(payload.nodeID != nodeID){
@@ -99,11 +128,10 @@ bool RF24Wave::confirmAssociations(){
               available = false;
             };
           }
-          Serial.println(F("[confirmAssociations] ADD LIST BEGIN"));
+          //Serial.println(F("[confirmAssociations] ADD LIST BEGIN"));
           addListAssociations(payload);
           printAssociations();
           associated = true;
-          return available;
           break;
         default:
           break;
@@ -113,87 +141,134 @@ bool RF24Wave::confirmAssociations(){
   return available;
 }
 
-bool RF24Wave::checkAssociations(uint8_t ID, uint8_t *groups){
+bool RF24Wave::checkAssociations(init_msg_t *data)
+{
   uint8_t i;
-  uint8_t length = countGroups(groups);
   bool available = true;
-  for(i=0; i<length; i++){
-    if(!checkGroup(ID, groups[i])){
+  for(i=0; i<MAX_GROUPS; i++){
+    if(!checkGroup(data->nodeID, data->groupsID[i])){
       available = false;
-      groups[i] = 0;
+      data->groupsID[i] = 0;
     }
   }
-  init_msg_t payload;
-  payload.nodeID = ID;
-  payload.groupsID = groups;
-  if(!mesh.write(&payload, ACK_INIT_MSG_T, sizeof(init_msg_t), ID)){
+  if(!mesh.write(data, ACK_INIT_MSG_T, sizeof(init_msg_t), data->nodeID)){
     Serial.println(F("[ERROR] unable to send response!"));
   }
-  Serial.println(F("[requestAssociations] checkAss END"));
   return available;
 }
 
-bool RF24Wave::checkGroup(uint8_t ID, uint8_t group){
+bool RF24Wave::checkGroup(uint8_t ID, uint8_t group)
+{
   uint8_t i;
-  for(i=0; i<5; i++){
-    /* We check if we can add ID to group or if ID exist in group ! */
-    if(listGroupsID[group][i] == ID || listGroupsID[group][i] == 0){
-      return true;
+  /* if group == 0 then it's unnecessary to check if it's available */
+  if(group > 0){
+    for(i=0; i<MAX_NODE_GROUPS; i++){
+      /* We check if we can add ID to group or if ID exist in group ! */
+      if(listGroupsID[group-1][i] == ID || listGroupsID[group-1][i] == 0){
+        return true;
+      }
     }
+    return false;
+  }else{
+    return true;
   }
-  return false;
 }
 
-void RF24Wave::addListAssociations(init_msg_t data){
-  uint8_t i, j, length;
-  uint8_t temp;
+void RF24Wave::addListAssociations(init_msg_t data)
+{
+  uint8_t i, j, temp, currentGroup;
   bool added;
-  length = countGroups(data.groupsID);
-  for(i=0; i<length; i++){
+  for(i=0; i<MAX_GROUPS; i++){
     added = false;
     j = 0;
+    currentGroup = data.groupsID[i]-1;
+    if(currentGroup >= 0){
+      //We add new association only if we found one zero in listGroupsID
+      while(j < MAX_NODE_GROUPS && !added){
+        temp = listGroupsID[currentGroup][j];
+        if(temp == 0){
+          listGroupsID[currentGroup][j] = data.nodeID;
+          added = true;
+        }else if(temp == data.nodeID){
+          added = true;
+        }else{
+          j++;
+        }
+      }
+    }
+    /*
+    if(!added){
+      Serial.print(F("[addListAssociations] ERR: Unable to add node to group : "));
+      Serial.println(data.groupsID[i]);
+    }else{
+      Serial.print(F("[addListAssociations] INFO: Add node to group : "));
+      Serial.println(data.groupsID[i]);
+    }
+    */
+  }
+}
+
+void RF24Wave::addListAssociation(update_msg_t data)
+{
+  uint8_t i, temp;
+  bool added = false;
+  if(data.groupID > 0){
     //We add new association only if we found one zero in listGroupsID
-    while(j < MAX_NODE_GROUPS && !added){
-      temp = listGroupsID[data.groupsID[i]-1][j];
+    while(i < MAX_NODE_GROUPS && !added){
+      temp = listGroupsID[data.groupID-1][i];
       if(temp == 0){
-        listGroupsID[data.groupsID[i]-1][0] = data.nodeID;
+        listGroupsID[data.groupID-1][i] = data.nodeID;
         added = true;
       }else if(temp == data.nodeID){
         added = true;
       }else{
-        j++;
+        i++;
       }
     }
-    if(!added){
-      Serial.print(F("[addListAssociations] ERR: Unable to add node to group : "));
-      Serial.println(data.groupsID[i]);
-    }
+  }
+  if(!added){
+    Serial.print(F("[addListAssociation] ERR: Unable to add node to group : "));
+    Serial.println(data.groupID);
+  }else{
+    Serial.print(F("[addListAssociation] INFO: Add node to group : "));
+    Serial.println(data.groupID);
   }
 }
 
-void RF24Wave::broadcastAssociations(init_msg_t data){
-  uint8_t i, length;
+void RF24Wave::broadcastAssociations(init_msg_t data)
+{
+  uint8_t i;
   uint8_t group = 0;
-  length = countGroups(data.groupsID);
-  for(i=0; i<length; i++){
+  for(i=0; i<MAX_GROUPS; i++){
     group = data.groupsID[i];
     if(group > 0){
-      sendUpdateGroup(data.nodeID, group, listGroupsID[group-1]);
+      if(!sendUpdateGroup(data.nodeID, group, listGroupsID[group-1])){
+        Serial.println(F("[broadcastAssociations] ERR: Unable to send Update !"));
+      }
     }
   }
 }
 
-bool RF24Wave::sendUpdateGroup(uint8_t nodeID, uint8_t groupID, uint8_t *listGroupsID){
-  uint8_t i;
+bool RF24Wave::sendUpdateGroup(uint8_t NID, uint8_t GID, uint8_t *listNID)
+{
+  uint8_t i, currentNID;
   bool successful = true;
-  for(i=0; i<5; i++){
-    // We check that we only send update to other nodes. Not original node or controller !
-    if((listGroupsID[i] != 0) && (listGroupsID[i] != nodeID)){
+  for(i=0; i<MAX_NODE_GROUPS; i++){
+    /* We catch the nodeID associated to groupID and we check if we must send update */
+    currentNID = listNID[i];
+    /* We check that we only send update to other nodes. Not original node or controller ! */
+    if((currentNID > 0) && (currentNID != NID)){
       update_msg_t payload;
-      payload.nodeID = nodeID;
-      payload.groupID = groupID;
-      if(!mesh.write(&payload, UPDATE_MSG_T, sizeof(update_msg_t), 0)){
+      payload.nodeID = NID;
+      payload.groupID = GID;
+      if(!mesh.write(&payload, UPDATE_MSG_T, sizeof(update_msg_t), currentNID)){
         successful = false;
+        Serial.println(F("[sendUpdateGroup] ERR: Unable to send Update !"));
+        Serial.print(F("[sendUpdateGroup] NID: "));
+        Serial.print(payload.nodeID);
+        Serial.print(F(" GID: "));
+        Serial.print(payload.groupID);
+        Serial.println("");
       }
     }
   }
@@ -202,11 +277,12 @@ bool RF24Wave::sendUpdateGroup(uint8_t nodeID, uint8_t groupID, uint8_t *listGro
 
 
 
-void RF24Wave::printAssociations(){
+void RF24Wave::printAssociations()
+{
   uint8_t i, j;
-  Serial.println(F("*** Matrix Associations ***"));
+  Serial.println(F("# Matrix Associations :"));
   for(i=0; i<MAX_GROUPS; i++){
-    Serial.print(F("Group "));
+    Serial.print(F("> GroupID "));
     Serial.print(i+1);
     Serial.print(F(" : "));
     for(j=0; j<MAX_NODE_GROUPS; j++){
@@ -218,10 +294,52 @@ void RF24Wave::printAssociations(){
   Serial.println();
 }
 
-uint8_t RF24Wave::countGroups(uint8_t *groups){
+void RF24Wave::printAssociation(init_msg_t data)
+{
+  uint8_t i;
+  Serial.println(F("# Print Associations :"));
+  Serial.print(F("> NodeID: "));
+  Serial.println(data.nodeID);
+  Serial.print(F("> GroupID: "));
+  for(i=0; i<MAX_GROUPS; i++){
+    Serial.print(data.groupsID[i]);
+    Serial.print("; ");
+  }
+  Serial.println();
+}
+
+void RF24Wave::printUpdate(update_msg_t data)
+{
+  Serial.println(F("# Print Update :"));
+  Serial.print(F("> NodeID: "));
+  Serial.println(data.nodeID);
+  Serial.print(F("> GroupID: "));
+  Serial.println(data.groupID);
+  Serial.println();
+}
+
+uint8_t RF24Wave::countGroups(uint8_t *groups)
+{
   uint8_t length=0;
   while(groups[length]){
     length++;
   }
   return length;
+}
+
+void RF24Wave::printNetwork()
+{
+  uint32_t currentTimer = millis();
+  if(currentTimer - lastTimer > 5000){
+    lastTimer = currentTimer;
+    Serial.println(" ");
+    Serial.println(F("********Assigned Addresses********"));
+    for(int i=0; i<mesh.addrListTop; i++){
+      Serial.print("NodeID: ");
+      Serial.print(mesh.addrList[i].nodeID);
+      Serial.print(" RF24Network Address: 0");
+      Serial.println(mesh.addrList[i].address, OCT);
+    }
+    Serial.println(F("**********************************"));
+  }
 }
