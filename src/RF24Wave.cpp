@@ -17,7 +17,7 @@ mesh(_mesh), network(_network)
   }
 };
 
-bool RF24Wave::begin()
+void RF24Wave::begin()
 {
   mesh.setNodeID(nodeID);
   nodeID = mesh.getNodeID();
@@ -33,13 +33,21 @@ bool RF24Wave::begin()
   }
   Serial.println(F("Connecting to the wave..."));
   if(nodeID != 0){
-    while(!requestAssociations()){
-      delay(1000);
-    }
-    return confirmAssociations();
-  }else{
-    return true;
+    connect();
   }
+}
+
+void RF24Wave::connect()
+{
+  while(!associated){
+    uint32_t currentTimer = millis();
+    if(currentTimer - lastTimer > 5000){
+      lastTimer = currentTimer;
+      requestAssociations();
+    }
+    confirmAssociations();
+  }
+  Serial.println(F("Node connected"));
 }
 
 bool RF24Wave::requestAssociations()
@@ -53,6 +61,7 @@ bool RF24Wave::requestAssociations()
   printAssociation(payload);
   mesh.update();
   if(!mesh.write(&payload, INIT_MSG_T, sizeof(init_msg_t), 0)){
+    Serial.println(F("[requestAssociations] ERROR: Unable to send data"));
     // If a write fails, check connectivity to the mesh network
     if(!mesh.checkConnection()){
       //refresh the network address
@@ -94,6 +103,11 @@ void RF24Wave::listen(){
         addListAssociation(update_payload);
         printAssociations();
         break;
+      case NOTIF_MSG_T:
+        notif_msg_t notification_payload;
+        network.read(header, &notification_payload, sizeof(notification_payload));
+        printNotification(notification_payload);
+        break;
       default:
         break;
     }
@@ -106,36 +120,34 @@ bool RF24Wave::confirmAssociations()
   associated = false;
   uint8_t i = 0;
   uint8_t length = 0;
-  while(!associated){
-    mesh.update();
-    while(network.available()){
-      RF24NetworkHeader header;
-      network.peek(header);
-      switch(header.type){
-        case ACK_INIT_MSG_T:
-          //Serial.println(F("[confirmAssociations] INFO ACK_INIT_MSG_T BEGIN"));
-          init_msg_t payload;
-          network.read(header, &payload, sizeof(payload));
-          if(payload.nodeID != nodeID){
-            Serial.println(F("[confirmAssociations] ERROR nodeID"));
+  mesh.update();
+  while(network.available()){
+    RF24NetworkHeader header;
+    network.peek(header);
+    switch(header.type){
+      case ACK_INIT_MSG_T:
+        //Serial.println(F("[confirmAssociations] INFO ACK_INIT_MSG_T BEGIN"));
+        init_msg_t payload;
+        network.read(header, &payload, sizeof(payload));
+        if(payload.nodeID != nodeID){
+          Serial.println(F("[confirmAssociations] ERROR nodeID"));
+          available = false;
+        }
+        length = countGroups(payload.groupsID);
+        for(i=0; i<length; i++){
+          if(groupsID[i] != payload.groupsID[i]){
+            Serial.print(F("[confirmAssociations] ERROR groupID"));
+            Serial.println(groupsID[i]);
             available = false;
-          }
-          length = countGroups(payload.groupsID);
-          for(i=0; i<length; i++){
-            if(groupsID[i] != payload.groupsID[i]){
-              Serial.print(F("[confirmAssociations] ERROR groupID"));
-              Serial.println(groupsID[i]);
-              available = false;
-            };
-          }
-          //Serial.println(F("[confirmAssociations] ADD LIST BEGIN"));
-          addListAssociations(payload);
-          printAssociations();
-          associated = true;
-          break;
-        default:
-          break;
-      }
+          };
+        }
+        //Serial.println(F("[confirmAssociations] ADD LIST BEGIN"));
+        addListAssociations(payload);
+        printAssociations();
+        associated = true;
+        break;
+      default:
+        break;
     }
   }
   return available;
@@ -147,6 +159,7 @@ bool RF24Wave::checkAssociations(init_msg_t *data)
   bool available = true;
   for(i=0; i<MAX_GROUPS; i++){
     if(!checkGroup(data->nodeID, data->groupsID[i])){
+      Serial.println(F("[ERROR] Unable group!"));
       available = false;
       data->groupsID[i] = 0;
     }
@@ -342,4 +355,45 @@ void RF24Wave::printNetwork()
     }
     Serial.println(F("**********************************"));
   }
+}
+
+void RF24Wave::broadcastNotifications(MyMessage &message)
+{
+  notif_msg_t data;
+  uint32_t currentTimer = millis();
+  if(currentTimer - lastTimer > 5000){
+    lastTimer = currentTimer;
+    uint8_t i, j, currentGroup, currentDstID;
+    for(i=0; i<MAX_GROUPS; i++){
+      currentGroup = groupsID[i];
+      if(currentGroup > 0){
+        for(j=0; j<MAX_NODE_GROUPS; j++){
+          currentDstID = listGroupsID[currentGroup-1][j];
+          if((currentDstID > 0) && (currentDstID != nodeID)){
+            message.setDestination(currentDstID);
+            strncpy(data.myMessage, protocolFormat(message), MY_GATEWAY_MAX_SEND_LENGTH);
+            //memcpy(data.myMessage, protocolFormat(message), sizeof(data.myMessage));
+            Serial.println(F("[broadcastNotifications] Send notification"));
+            mesh.write(&data, NOTIF_MSG_T, sizeof(data), currentDstID);
+          }
+        }
+      }
+    }
+  }
+}
+
+void RF24Wave::printNotification(notif_msg_t data)
+{
+  MyMessage message;
+  if(protocolParse(message, data.myMessage)){
+    Serial.println(F("> Notification received !"));
+    Serial.print(F("Node Dest: "));
+    Serial.println(message.destination);
+    Serial.print(F("Type: "));
+    Serial.println(message.type);
+    // Serial.print(F("Value: "));
+    // Serial.println(data.value);
+    Serial.println();
+  }
+
 }

@@ -3,6 +3,7 @@
 
 #include <arduino.h>
 #include <RF24Mesh.h>
+#include <MyProtocol.h>
 
 /*
  * Message types 1-64 (decimal) will NOT be acknowledged by the network,
@@ -10,17 +11,27 @@
  * if expecting a response, no ack is needed.
  */
 
-#define INIT_MSG_T 65
+#define INIT_MSG_T 2
 #define ACK_INIT_MSG_T 66
 #define UPDATE_MSG_T 67
+#define NOTIF_MSG_T 68
 
 #define MAX_NODE_GROUPS 5
 #define MAX_GROUPS 9
+
+/*
+ * Define to set the delay between two print serial
+ */
+#define PRINT_DELAY
 
 typedef struct{
   uint8_t nodeID;
   uint8_t groupsID[MAX_GROUPS];
 }init_msg_t;
+
+typedef struct{
+  char myMessage[MY_GATEWAY_MAX_SEND_LENGTH];
+}notif_msg_t;
 
 typedef struct{
   uint8_t nodeID;
@@ -34,7 +45,8 @@ class RF24Wave
 {
   public:
     RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID=0, uint8_t *groups=NULL);
-    bool begin();
+    void begin();
+    void connect();
     bool requestAssociations();
     bool confirmAssociations();
     void listen();
@@ -49,6 +61,8 @@ class RF24Wave
     void printAssociation(init_msg_t data);
     void printUpdate(update_msg_t data);
     void addListAssociation(update_msg_t data);
+    void broadcastNotifications(MyMessage &message);
+    void printNotification(notif_msg_t data);
 
   private:
     RF24Mesh& mesh;
