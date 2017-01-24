@@ -1,3 +1,14 @@
+/**
+ * \file RF24Wave.h
+ * \brief Class declaration for RF24Wave
+ * \author LAMBRECHT.A
+ * \version 0.5
+ * \date 01-01-2017
+ *
+ * Implementation of Z-Wave protocol with nRF24l01
+ *
+ */
+
 #ifndef __RF24WAVE_H
 #define __RF24WAVE_H
 
@@ -5,12 +16,14 @@
 #include <RF24Mesh.h>
 #include <MyProtocol.h>
 
-/*
+/***
+ * Wave Message Types
+ * This types determine what message is transmited through the network
+ *
  * Message types 1-64 (decimal) will NOT be acknowledged by the network,
  * types 65-127 will be. Use as appropriate to manage traffic:
  * if expecting a response, no ack is needed.
- */
-
+ ***/
 #define CONNECT_MSG_T           65
 #define ACK_CONNECT_MSG_T       66
 #define UPDATE_MSG_T            67
@@ -18,14 +31,28 @@
 #define SYNCHRONIZE_MSG_T       69
 #define ACK_SYNCHRONIZE_MSG_T   70
 
-#define MAX_NODE_GROUPS         5
-#define MAX_GROUPS              9
-
-/*
- * Define to set the delay between two print serial
+/**
+ * \defgroup defConfig Library config
+ * \brief Macros which defined some settings for this library
+ * @{
  */
-#define PRINT_DELAY
 
+/** Maximum node assigned per groups */
+#define MAX_NODE_GROUPS         5
+/** Maximum groups */
+#define MAX_GROUPS              9
+/** Delay in ms between two print info */
+#define PRINT_DELAY             5000
+
+ /** @} */
+
+/**
+ * \struct info_node_t
+ * \brief Structure of information message
+ *
+ * info_node_t is a structure that permits to send initial information of node
+ * like nodeID or groups associated with the node.
+ */
 typedef struct{
   uint8_t nodeID;
   uint8_t groupsID[MAX_GROUPS];
@@ -50,8 +77,30 @@ class RF24Network;
 
 class RF24Wave
 {
+ /**@}*/
+ /**
+  * @name RF24Wave
+  *
+  *  The implementation of Z-Wave with nRF24l01 and class documentation is currently in active development and usage may change.
+  */
+ /**@{*/
   public:
+    /**
+     * Construct the network based on Z-Wave protocol:
+     *
+     * @code
+     * RF24 radio(7,8);
+     * RF24Network network(radio);
+     * RF24Mesh mesh(radio,network);
+     * RF24Wave wave(network, mesh)
+     * @endcode
+     * @param _network The underlying network instance
+     * @param _mesh The underlying mesh instance
+     * @param NodeID The NodeID associated to node (0 for master)
+     * @param groups Tab of groups associated to this node (null for master)
+     */
     RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID=0, uint8_t *groups=NULL);
+    
     void begin();
     void listen();
     void connect();
@@ -84,6 +133,7 @@ class RF24Wave
     RF24Network& network;
     bool associated = false;
     bool synchronized = false;
+
     uint8_t nodeID;
     /* Struct to stock different group ID proper to this node */
     uint8_t groupsID[MAX_GROUPS];

@@ -1,6 +1,17 @@
+/**
+ * \file RF24Wave.cpp
+ * \brief Class definition for RF24Wave
+ * \author LAMBRECHT.A
+ * \version 0.5
+ * \date 01-01-2017
+ *
+ * Implementation of Z-Wave protocol with nRF24l01
+ *
+ */
+
 #include "RF24Wave.h"
 
-
+/*****************************************************/
 RF24Wave::RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID, uint8_t *groups):
 mesh(_mesh), network(_network)
 {
@@ -16,6 +27,7 @@ mesh(_mesh), network(_network)
     }
   }
 };
+/*****************************************************/
 
 void RF24Wave::begin()
 {
@@ -243,6 +255,12 @@ void RF24Wave::sendSynchronizedList(info_node_t msg){
   send_list_t payload;
   uint8_t i, j, currentGroup;
   mesh.update();
+  /* We initialize array with zeros */
+  for(i=0; i<MAX_GROUPS; i++){
+    for(j=0; j<MAX_NODE_GROUPS; j++){
+      payload.listGroupsID[i][j] = 0;
+    }
+  }
   payload.nodeID = msg.nodeID;
   for(i=0; i<MAX_GROUPS; i++){
     currentGroup = msg.groupsID[i];
@@ -288,13 +306,14 @@ void RF24Wave::addAssociation(uint8_t NID, uint8_t GID)
   uint8_t i, temp;
   bool added = false;
   if(GID > 0 && NID > 0){
+    i = 0;
     //We add new association only if we found one zero in listGroupsID
     while(i < MAX_NODE_GROUPS && !added){
       temp = listGroupsID[GID-1][i];
       if(temp == 0){
         listGroupsID[GID-1][i] = NID;
         added = true;
-      }else if(temp == GID){
+      }else if(temp == NID){
         added = true;
       }
       i++;
