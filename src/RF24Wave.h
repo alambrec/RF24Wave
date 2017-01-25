@@ -16,6 +16,11 @@
 #include <RF24Mesh.h>
 #include <MyProtocol.h>
 
+// #if defined(WAVE_MASTER)
+// #undef MASTER_MODE
+// #endif
+
+
 /***
  * Wave Message Types
  * This types determine what message is transmited through the network
@@ -100,39 +105,49 @@ class RF24Wave
      * @param groups Tab of groups associated to this node (null for master)
      */
     RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID=0, uint8_t *groups=NULL);
-    
+
+/***************************** Common functions *****************************/
     void begin();
     void listen();
-    void connect();
 
-    bool requestAssociations();
-    bool confirmAssociations();
-
-    bool checkAssociations(info_node_t *data);
-    bool checkGroup(uint8_t ID, uint8_t group);
     void printAssociations();
     void addListAssociations(info_node_t data);
-    uint8_t countGroups(uint8_t *groups);
-    void broadcastAssociations(info_node_t data);
-    bool sendUpdateGroup(uint8_t NID, uint8_t GID, uint8_t *listNID);
-    void printNetwork();
-    void printAssociation(info_node_t data);
-    void printUpdate(update_msg_t data);
     void addAssociation(uint8_t NID, uint8_t GID);
+    bool isPresent(uint8_t NID, uint8_t GID);
+    void printAssociation(info_node_t data);
+    uint8_t countGroups(uint8_t *groups);
+
+#if !defined(WAVE_MASTER)
+/***************************** Node functions *******************************/
+    void connect();
+    bool requestAssociations();
+    bool confirmAssociations();
+    void synchronizeAssociations();
+    void requestSynchronize();
+    void confirmSynchronize();
+    void receiveSynchronizedList(send_list_t msg);
     void broadcastNotifications(MyMessage &message);
     void printNotification(notif_msg_t data);
-    bool isPresent(uint8_t NID, uint8_t GID);
-    void requestSynchronize();
+    void printUpdate(update_msg_t data);
+
+#else
+/***************************** Master functions *****************************/
+    bool checkAssociations(info_node_t *data);
+    bool checkGroup(uint8_t ID, uint8_t group);
+    void broadcastAssociations(info_node_t data);
+    bool sendUpdateGroup(uint8_t NID, uint8_t GID, uint8_t *listNID);
     void sendSynchronizedList(info_node_t msg);
-    void synchronizeAssociations();
-    void receiveSynchronizedList(send_list_t msg);
-    void confirmSynchronize();
+    void printNetwork();
+
+#endif
 
   private:
     RF24Mesh& mesh;
     RF24Network& network;
+#if !defined(WAVE_MASTER)
     bool associated = false;
     bool synchronized = false;
+#endif
 
     uint8_t nodeID;
     /* Struct to stock different group ID proper to this node */
