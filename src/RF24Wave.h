@@ -14,7 +14,7 @@
 
 #include <arduino.h>
 #include <RF24Mesh.h>
-#include <MyProtocol.h>
+#include <MyMessage.h>
 
 /***
  * Wave Message Types
@@ -58,8 +58,26 @@ typedef struct{
   uint8_t groupsID[MAX_GROUPS];
 }info_node_t;
 
+// typedef struct{
+//   char myMessage[MY_GATEWAY_MAX_SEND_LENGTH];
+// }notif_msg_t;
+
 typedef struct{
-  char myMessage[MY_GATEWAY_MAX_SEND_LENGTH];
+  uint8_t destID;
+  uint8_t tSensor;
+  uint8_t tValue;
+  uint8_t tPayload;
+  union {
+		uint8_t bValue;
+		uint16_t uiValue;
+		int16_t iValue;
+		uint32_t ulValue;
+		int32_t lValue;
+		struct { // Float messages
+			float fValue;
+			uint8_t fPrecision;   // Number of decimals when serializing
+		};
+	} payload;
 }notif_msg_t;
 
 typedef struct{
@@ -129,7 +147,12 @@ class RF24Wave
     void requestSynchronize();
     void confirmSynchronize();
     void receiveSynchronizedList(send_list_t msg);
-    void broadcastNotifications(MyMessage &message);
+    //void broadcastNotifications(MyMessage &message);
+    void broadcastNotifications(notif_msg_t data);
+    void sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
+      mysensor_payload tPayload, int16_t payload);
+    void sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
+      mysensor_payload tPayload, int32_t payload);
     void printNotification(notif_msg_t data);
     void printUpdate(update_msg_t data);
     void addNodeToBroadcastList(uint8_t NID);

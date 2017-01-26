@@ -328,28 +328,130 @@ void RF24Wave::requestSynchronize(){
   }
 }
 
-void RF24Wave::broadcastNotifications(MyMessage &message)
+// void RF24Wave::broadcastNotifications(MyMessage &message)
+// {
+//   //notif_msg_t data;
+//   uint32_t currentTimer = millis();
+//   uint8_t i;
+//   if(currentTimer - lastTimer > 5000){
+//     lastTimer = currentTimer;
+//     createBroadcastList();
+//     broadcast_list_t *currentElt = headBroadcastList;
+//     while(currentElt){
+//       i=0;
+//       message.setDestination(currentElt->nodeID);
+//       //char * temp = message.data;
+//       //strncpy(data.myMessage, protocolFormat(message), MY_GATEWAY_MAX_SEND_LENGTH);
+//       //memcpy(data.myMessage, protocolFormat(message), sizeof(data.myMessage));
+//       Serial.print(F("[broadcastNotifications] Send notification to "));
+//       Serial.println(currentElt->nodeID);
+//
+//       if(message.data){
+//         Serial.println(F("[broadcastNotifications] Data send :"));
+//         while(message.data[i] != '\0'){
+//           Serial.print(message.data[i], HEX);
+//           i++;
+//         }
+//       }
+//       else{
+//         Serial.println(F("[broadcastNotifications] Null Data send"));
+//       }
+//       Serial.println("");
+//       /*
+//       if(!mesh.write(&data, NOTIF_MSG_T, sizeof(data), currentElt->nodeID)){
+//         Serial.println(F("[broadcastNotifications] Unable to send notification "));
+//       }
+//       */
+//       currentElt = currentElt->next;
+//     }
+//   }
+// }
+
+void RF24Wave::sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
+  mysensor_payload tPayload, int16_t payload)
 {
   notif_msg_t data;
   uint32_t currentTimer = millis();
-
   if(currentTimer - lastTimer > 5000){
     lastTimer = currentTimer;
-    createBroadcastList();
-    broadcast_list_t *currentElt = headBroadcastList;
-    while(currentElt){
-      message.setDestination(currentElt->nodeID);
-      strncpy(data.myMessage, protocolFormat(message), MY_GATEWAY_MAX_SEND_LENGTH);
-      //memcpy(data.myMessage, protocolFormat(message), sizeof(data.myMessage));
-      Serial.print(F("[broadcastNotifications] Send notification to "));
-      Serial.println(currentElt->nodeID);
-      Serial.println(F("[broadcastNotifications] Data send :"));
-      Serial.println(data.myMessage);
-      if(!mesh.write(&data, NOTIF_MSG_T, sizeof(data), currentElt->nodeID)){
-        Serial.println(F("[broadcastNotifications] Unable to send notification "));
-      }
-      currentElt = currentElt->next;
+    data.tSensor = tSensor;
+    data.tValue = tValue;
+    data.tPayload = tPayload;
+    data.payload.iValue = payload;
+    broadcastNotifications(data);
+  }
+}
+
+void RF24Wave::sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
+  mysensor_payload tPayload, int32_t payload)
+{
+  notif_msg_t data;
+  uint32_t currentTimer = millis();
+  if(currentTimer - lastTimer > 5000){
+    lastTimer = currentTimer;
+    data.tSensor = tSensor;
+    data.tValue = tValue;
+    data.tPayload = tPayload;
+    data.payload.lValue = payload;
+    broadcastNotifications(data);
+  }
+}
+
+void RF24Wave::broadcastNotifications(notif_msg_t data)
+{
+  createBroadcastList();
+  broadcast_list_t *currentElt = headBroadcastList;
+  while(currentElt){
+    data.destID = currentElt->nodeID;
+    Serial.print(F("[broadcastNotifications] Send notification to "));
+    Serial.println(data.destID);
+    if(!mesh.write(&data, NOTIF_MSG_T, sizeof(data), data.destID)){
+      Serial.println(F("[broadcastNotifications] Unable to send notification "));
     }
+    currentElt = currentElt->next;
+  }
+}
+
+void RF24Wave::printNotification(notif_msg_t data)
+{
+  Serial.println(F("[printNotification] Print notification :"));
+  Serial.print(F("[printNotification] destID: "));
+  Serial.println(data.destID);
+  Serial.print(F("[printNotification] tSensor: "));
+  Serial.println(data.tSensor);
+  Serial.print(F("[printNotification] tValue: "));
+  Serial.println(data.tValue);
+  Serial.print(F("[printNotification] tPayload: "));
+  Serial.println(data.tPayload);
+  Serial.print(F("[broadcastNotifications] payload "));
+  switch(data.tPayload){
+    case P_STRING:
+      Serial.println("STRING PAYLOAD");
+      break;
+    case P_BYTE:
+      Serial.println(data.payload.bValue);
+      break;
+    case P_INT16:
+      Serial.println(data.payload.iValue);
+      break;
+    case P_UINT16:
+      Serial.println(data.payload.uiValue);
+      break;
+    case P_LONG32:
+      Serial.println(data.payload.lValue);
+      break;
+    case P_ULONG32:
+      Serial.println(data.payload.ulValue);
+      break;
+    case P_CUSTOM:
+      Serial.println("CUSTOM PAYLOAD");
+      break;
+    case P_FLOAT32:
+      Serial.println(data.payload.fValue, data.payload.fPrecision);
+      break;
+    default:
+      Serial.println("UNKNOW PAYLOAD");
+      break;
   }
 }
 
@@ -387,6 +489,7 @@ void RF24Wave::addNodeToBroadcastList(uint8_t NID){
       if(currentElt->nodeID == NID){
         found = true;
       }
+      currentElt = currentElt->next;
     }
     if(currentElt->nodeID == NID){
       found = true;
@@ -418,20 +521,20 @@ void RF24Wave::printUpdate(update_msg_t data)
   Serial.println();
 }
 
-void RF24Wave::printNotification(notif_msg_t data)
-{
-  MyMessage message;
-  if(protocolParse(message, data.myMessage)){
-    Serial.println(F("> Notification received !"));
-    Serial.print(F("Node Dest: "));
-    Serial.println(message.destination);
-    Serial.print(F("Type: "));
-    Serial.println(message.type);
-    // Serial.print(F("Value: "));
-    // Serial.println(data.value);
-    Serial.println();
-  }
-}
+// void RF24Wave::printNotification(notif_msg_t data)
+// {
+//   MyMessage message;
+//   if(protocolParse(message, data.myMessage)){
+//     Serial.println(F("> Notification received !"));
+//     Serial.print(F("Node Dest: "));
+//     Serial.println(message.destination);
+//     Serial.print(F("Type: "));
+//     Serial.println(message.type);
+//     // Serial.print(F("Value: "));
+//     // Serial.println(data.value);
+//     Serial.println();
+//   }
+// }
 
 
 
