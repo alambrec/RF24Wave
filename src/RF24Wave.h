@@ -16,11 +16,6 @@
 #include <RF24Mesh.h>
 #include <MyProtocol.h>
 
-// #if defined(WAVE_MASTER)
-// #undef MASTER_MODE
-// #endif
-
-
 /***
  * Wave Message Types
  * This types determine what message is transmited through the network
@@ -77,6 +72,13 @@ typedef struct{
   uint8_t listGroupsID[MAX_GROUPS][MAX_NODE_GROUPS];
 }send_list_t;
 
+struct broadcast_list{
+  uint8_t nodeID;
+  broadcast_list *next;
+};
+
+typedef broadcast_list broadcast_list_t;
+
 class RF24Mesh;
 class RF24Network;
 
@@ -110,6 +112,7 @@ class RF24Wave
     void begin();
     void listen();
 
+    void resetListGroup();
     void printAssociations();
     void addListAssociations(info_node_t data);
     void addAssociation(uint8_t NID, uint8_t GID);
@@ -129,6 +132,8 @@ class RF24Wave
     void broadcastNotifications(MyMessage &message);
     void printNotification(notif_msg_t data);
     void printUpdate(update_msg_t data);
+    void addNodeToBroadcastList(uint8_t NID);
+    void createBroadcastList();
 
 #else
 /***************************** Master functions *****************************/
@@ -147,11 +152,12 @@ class RF24Wave
 #if !defined(WAVE_MASTER)
     bool associated = false;
     bool synchronized = false;
-#endif
-
-    uint8_t nodeID;
     /* Struct to stock different group ID proper to this node */
     uint8_t groupsID[MAX_GROUPS];
+    broadcast_list_t *headBroadcastList = NULL;
+    uint8_t lengthBroadcastList = 0;
+#endif
+    uint8_t nodeID;
     /* Matrix to stock nodeID for each different groupID */
     uint8_t listGroupsID[MAX_GROUPS][MAX_NODE_GROUPS];
     uint32_t lastTimer;

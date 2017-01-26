@@ -16,6 +16,7 @@ RF24Wave::RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID, uint8
 mesh(_mesh), network(_network)
 {
   nodeID = NodeID;
+#if !defined(WAVE_MASTER)
   uint8_t i, length;
   length = countGroups(groups);
   for(i=0; i<MAX_GROUPS; i++){
@@ -26,6 +27,8 @@ mesh(_mesh), network(_network)
       groupsID[i] = groups[i];
     }
   }
+#endif
+
 };
 
 
@@ -39,13 +42,7 @@ void RF24Wave::begin()
   Serial.println(F("Connecting to the mesh..."));
   mesh.begin();
   lastTimer = millis();
-  /* Loop to init matrix */
-  uint8_t i, j;
-  for(i=0; i<MAX_GROUPS; i++){
-    for(j=0; j<MAX_NODE_GROUPS; j++){
-      listGroupsID[i][j] = 0;
-    }
-  }
+  resetListGroup();
   Serial.println(F("Connecting to the wave..."));
 #if !defined(WAVE_MASTER)
   connect();
@@ -91,12 +88,23 @@ void RF24Wave::listen(){
         break;
       case NOTIF_MSG_T:
         notif_msg_t notification_payload;
+        Serial.println(F("[notif received] !"));
         network.read(header, &notification_payload, sizeof(notification_payload));
         printNotification(notification_payload);
         break;
 #endif
       default:
         break;
+    }
+  }
+}
+
+void RF24Wave::resetListGroup(){
+  uint8_t i, j;
+  /* Loop to init matrix */
+  for(i=0; i<MAX_GROUPS; i++){
+    for(j=0; j<MAX_NODE_GROUPS; j++){
+      listGroupsID[i][j] = 0;
     }
   }
 }
@@ -187,7 +195,6 @@ void RF24Wave::printAssociations()
 
 #if !defined(WAVE_MASTER)
 /***************************** Node functions *******************************/
-//#error NODE_ENABLED
 void RF24Wave::connect()
 {
   while(!associated){
@@ -325,25 +332,80 @@ void RF24Wave::broadcastNotifications(MyMessage &message)
 {
   notif_msg_t data;
   uint32_t currentTimer = millis();
+
   if(currentTimer - lastTimer > 5000){
     lastTimer = currentTimer;
-    uint8_t i, j, currentGroup, currentDstID;
-    for(i=0; i<MAX_GROUPS; i++){
-      currentGroup = groupsID[i];
-      if(currentGroup > 0){
-        for(j=0; j<MAX_NODE_GROUPS; j++){
-          currentDstID = listGroupsID[currentGroup-1][j];
-          if((currentDstID > 0) && (currentDstID != nodeID)){
-            message.setDestination(currentDstID);
-            strncpy(data.myMessage, protocolFormat(message), MY_GATEWAY_MAX_SEND_LENGTH);
-            //memcpy(data.myMessage, protocolFormat(message), sizeof(data.myMessage));
-            Serial.println(F("[broadcastNotifications] Send notification"));
-            mesh.write(&data, NOTIF_MSG_T, sizeof(data), currentDstID);
-          }
+    createBroadcastList();
+    broadcast_list_t *currentElt = headBroadcastList;
+    while(currentElt){
+      message.setDestination(currentElt->nodeID);
+      strncpy(data.myMessage, protocolFormat(message), MY_GATEWAY_MAX_SEND_LENGTH);
+      //memcpy(data.myMessage, protocolFormat(message), sizeof(data.myMessage));
+      Serial.print(F("[broadcastNotifications] Send notification to "));
+      Serial.println(currentElt->nodeID);
+      Serial.println(F("[broadcastNotifications] Data send :"));
+      Serial.println(data.myMessage);
+      if(!mesh.write(&data, NOTIF_MSG_T, sizeof(data), currentElt->nodeID)){
+        Serial.println(F("[broadcastNotifications] Unable to send notification "));
+      }
+      currentElt = currentElt->next;
+    }
+  }
+}
+
+void RF24Wave::createBroadcastList(){
+  Serial.println(F("[createBroadcastList] BEGIN"));
+  uint8_t i, j, currentGroup, currentDstID;
+  for(i=0; i<MAX_GROUPS; i++){
+    currentGroup = groupsID[i];
+    if(currentGroup > 0){
+      for(j=0; j<MAX_NODE_GROUPS; j++){
+        currentDstID = listGroupsID[currentGroup-1][j];
+        if((currentDstID > 0) && (currentDstID != nodeID)){
+          addNodeToBroadcastList(currentDstID);
         }
       }
     }
   }
+}
+
+void RF24Wave::addNodeToBroadcastList(uint8_t NID){
+  Serial.println(F("[addNodeToBroadcastList] BEGIN"));
+  bool found = false;
+  if(!headBroadcastList){
+    Serial.println(F("[addNodeToBroadcastList] Head list NULL"));
+    headBroadcastList = (broadcast_list_t*) calloc(1, sizeof(broadcast_list_t));
+    headBroadcastList->nodeID = NID;
+    headBroadcastList->next = NULL;
+    Serial.print(F("[addNodeToBroadcastList] Node "));
+    Serial.print(NID);
+    Serial.println(F(" added !"));
+  }
+  else{
+    broadcast_list_t *currentElt = headBroadcastList;
+    while(currentElt->next && !found){
+      if(currentElt->nodeID == NID){
+        found = true;
+      }
+    }
+    if(currentElt->nodeID == NID){
+      found = true;
+    }
+    if(!found){
+      currentElt->next = (broadcast_list_t*) calloc(1, sizeof(broadcast_list_t));
+      currentElt->next->nodeID = NID;
+      currentElt->next->next = NULL;
+      lengthBroadcastList++;
+      Serial.print(F("[addNodeToBroadcastList] Node "));
+      Serial.print(NID);
+      Serial.println(F(" added !"));
+    }else{
+      Serial.print(F("[addNodeToBroadcastList] Node "));
+      Serial.print(NID);
+      Serial.println(F(" already added !"));
+    }
+  }
+  Serial.println(F("[addNodeToBroadcastList] END"));
 }
 
 void RF24Wave::printUpdate(update_msg_t data)
