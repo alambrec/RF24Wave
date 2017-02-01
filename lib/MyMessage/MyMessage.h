@@ -335,7 +335,7 @@ typedef union {
 
 #endif
 	uint8_t last;            	 // 8 bit - Id of last node this message passed
-	uint8_t sender;          	 // 8 bit - Id of sender node (origin)
+	uint8_t sender;          	 // 8 bit - Id of sender node (origin) (NodeID)
 	uint8_t destination;     	 // 8 bit - Id of destination node
 
 	uint8_t version_length;		 // 2 bit - Protocol version
@@ -346,7 +346,7 @@ typedef union {
 	// 1 bit - Is ack messsage - Indicator that this is the actual ack message.
 	// 3 bit - Payload data type
 	uint8_t type;            	 // 8 bit - Type varies depending on command
-	uint8_t sensor;          	 // 8 bit - Id of sensor that this message concerns.
+	uint8_t sensor;          	 // 8 bit - Id of sensor that this message concerns. (Child ID)
 
 	// Each message can transfer a payload. We add one extra byte for string
 	// terminator \0 to be "printable" this is not transferred OTA

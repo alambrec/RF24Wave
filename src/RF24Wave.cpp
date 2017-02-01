@@ -8,8 +8,8 @@
  * Implementation of Z-Wave protocol with nRF24l01
  *
  */
-
 #include "RF24Wave.h"
+
 
 /***************************** Constructor **********************************/
 RF24Wave::RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID, uint8_t *groups):
@@ -47,6 +47,8 @@ void RF24Wave::begin()
 #if !defined(WAVE_MASTER)
   connect();
   synchronizeAssociations();
+#else
+  gatewayTransportInit();
 #endif
 }
 
@@ -78,6 +80,13 @@ void RF24Wave::listen(){
         network.read(header, &synchronize_payload, sizeof(synchronize_payload));
         sendSynchronizedList(synchronize_payload);
         break;
+      case MY_MESSAGE_T:
+        Serial.println(F("[MY_MESSAGE_T] Received !"));
+        network.read(header, _fmtBuffer, MY_GATEWAY_MAX_SEND_LENGTH);
+        if(protocolParse(_msgTmp, _fmtBuffer)){
+          Serial.println(F("[MY_MESSAGE_T] parse ok !"));
+          // Serial.print(_fmtBuffer);
+        }
 #else
       case UPDATE_MSG_T:
         update_msg_t update_payload;
@@ -191,6 +200,112 @@ void RF24Wave::printAssociations()
     Serial.println();
   }
   Serial.println();
+}
+
+MyMessage& RF24Wave::build(MyMessage &msg, const uint8_t NID, const uint8_t destID,
+                            const uint8_t childID, const uint8_t command,
+                            const uint8_t type, const bool ack)
+{
+	msg.sender = NID;
+	msg.destination = destID;
+	msg.sensor = childID;
+	msg.type = type;
+	mSetCommand(msg, command);
+	mSetRequestAck(msg, ack);
+	mSetAck(msg, false);
+	return msg;
+}
+
+uint8_t RF24Wave::protocolH2i(char c)
+{
+	uint8_t i = 0;
+	if (c <= '9') {
+		i += c - '0';
+	} else if (c >= 'a') {
+		i += c - 'a' + 10;
+	} else {
+		i += c - 'A' + 10;
+	}
+	return i;
+}
+
+bool RF24Wave::protocolParse(MyMessage &message, char *inputString)
+{
+	char *str, *p, *value=NULL;
+	uint8_t bvalue[MAX_PAYLOAD];
+	uint8_t blen = 0;
+	int i = 0;
+	uint8_t command = 0;
+
+	// Extract command data coming on serial line
+	for (str = strtok_r(inputString, ";", &p); // split using semicolon
+	        str && i < 6; // loop while str is not null an max 5 times
+	        str = strtok_r(NULL, ";", &p) // get subsequent tokens
+	    ) {
+		switch (i) {
+		case 0: // Radioid (destination)
+			message.destination = atoi(str);
+			break;
+		case 1: // Childid
+			message.sensor = atoi(str);
+			break;
+		case 2: // Message type
+			command = atoi(str);
+			mSetCommand(message, command);
+			break;
+		case 3: // Should we request ack from destination?
+			mSetRequestAck(message, atoi(str)?1:0);
+			break;
+		case 4: // Data type
+			message.type = atoi(str);
+			break;
+		case 5: // Variable value
+			if (command == C_STREAM) {
+				blen = 0;
+				while (*str) {
+					uint8_t val;
+					val = protocolH2i(*str++) << 4;
+					val += protocolH2i(*str++);
+					bvalue[blen] = val;
+					blen++;
+				}
+			} else {
+				value = str;
+				// Remove trailing carriage return and newline character (if it exists)
+				uint8_t lastCharacter = strlen(value)-1;
+				if (value[lastCharacter] == '\r') {
+					value[lastCharacter] = 0;
+				}
+				if (value[lastCharacter] == '\n') {
+					value[lastCharacter] = 0;
+				}
+			}
+			break;
+		}
+		i++;
+	}
+	//debug(PSTR("Received %d"), i);
+	// Check for invalid input
+	if (i < 5) {
+		return false;
+	}
+	message.sender = GATEWAY_ADDRESS;
+	message.last = GATEWAY_ADDRESS;
+	mSetAck(message, false);
+	if (command == C_STREAM) {
+		message.set(bvalue, blen);
+	} else {
+		message.set(value);
+	}
+	return true;
+}
+
+char* RF24Wave::protocolFormat(MyMessage &message)
+{
+	snprintf_P(_fmtBuffer, MY_GATEWAY_MAX_SEND_LENGTH, PSTR("%d;%d;%d;%d;%d;%s\n"), message.sender,
+	           message.sensor, (uint8_t)mGetCommand(message), (uint8_t)mGetAck(message), message.type,
+	           message.getString(_convBuffer));
+	return _fmtBuffer;
 }
 
 #if !defined(WAVE_MASTER)
@@ -367,6 +482,16 @@ void RF24Wave::requestSynchronize(){
 //   }
 // }
 
+void RF24Wave::sendMyMessage(MyMessage &message, uint8_t destID)
+{
+  protocolFormat(message);
+  Serial.println(F("[sendMyMessage] Data send :"));
+  Serial.print(_fmtBuffer);
+  if(!mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, destID)){
+    Serial.println(F("[sendMyMessage] Unable to send notification "));
+  }
+}
+
 void RF24Wave::sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
   mysensor_payload tPayload, int16_t payload)
 {
@@ -521,6 +646,21 @@ void RF24Wave::printUpdate(update_msg_t data)
   Serial.println();
 }
 
+void RF24Wave::sendSketchInfo(const uint8_t CID, const char *name, const char *version)
+{
+	if (name) {
+		sendMyMessage(build(_msgTmp, nodeID, GATEWAY_ADDRESS, CID, C_INTERNAL, I_SKETCH_NAME, false).set(name), 0);
+	}
+	if (version) {
+		sendMyMessage(build(_msgTmp, nodeID, GATEWAY_ADDRESS, CID, C_INTERNAL, I_SKETCH_VERSION, false).set(version), 0);
+	}
+}
+
+void RF24Wave::present(const uint8_t childId, const uint8_t sensorType, const char *description)
+{
+  sendMyMessage(build(_msgTmp, nodeID, GATEWAY_ADDRESS, childId, C_PRESENTATION, sensorType, false).set(description), 0);
+}
+
 // void RF24Wave::printNotification(notif_msg_t data)
 // {
 //   MyMessage message;
@@ -535,8 +675,6 @@ void RF24Wave::printUpdate(update_msg_t data)
 //     Serial.println();
 //   }
 // }
-
-
 
 #else
 /***************************** Master functions *****************************/
@@ -656,6 +794,30 @@ void RF24Wave::printNetwork()
     }
     Serial.println(F("**********************************"));
   }
+}
+
+void RF24Wave::gatewayTransportInit()
+{
+	gatewayTransportSend(buildGw(_msgTmp, I_GATEWAY_READY).set(MSG_GW_STARTUP_COMPLETE));
+	// Send presentation of locally attached sensors (and node if applicable)
+	//presentNode();
+}
+
+MyMessage& RF24Wave::buildGw(MyMessage &msg, const uint8_t type)
+{
+	msg.sender = GATEWAY_ADDRESS;
+	msg.destination = GATEWAY_ADDRESS;
+	msg.sensor = 255;
+	msg.type = type;
+	mSetCommand(msg, C_INTERNAL);
+	mSetRequestAck(msg, false);
+	mSetAck(msg, false);
+	return msg;
+}
+
+void RF24Wave::gatewayTransportSend(MyMessage &message)
+{
+	Serial.print(protocolFormat(message));
 }
 
 #endif

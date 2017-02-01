@@ -16,6 +16,51 @@
 #include <RF24Mesh.h>
 #include <MyMessage.h>
 
+#define MSG_GW_STARTUP_COMPLETE "Gateway startup complete."
+#define LIBRARY_VERSION "RF24Wave 1.0"
+
+// #undef PSTR
+// // #define PSTR(s) ((const PROGMEM char *)(s))
+// #define PSTR(x) (x)
+
+/**********************************
+*  Gateway config
+***********************************/
+
+/**
+ * @def MY_GATEWAY_MAX_RECEIVE_LENGTH
+ * @brief Max buffersize needed for messages coming from controller.
+ */
+#ifndef MY_GATEWAY_MAX_RECEIVE_LENGTH
+#define MY_GATEWAY_MAX_RECEIVE_LENGTH (100u) //100
+#endif
+
+/**
+ * @def MY_GATEWAY_MAX_SEND_LENGTH
+ * @brief Max buffer size when sending messages.
+ */
+#ifndef MY_GATEWAY_MAX_SEND_LENGTH
+#define MY_GATEWAY_MAX_SEND_LENGTH (120u) //120
+#endif
+
+/**
+ * @def MY_GATEWAY_MAX_CLIENTS
+ * @brief Max number of parallel clients (sever mode).
+ */
+#ifndef MY_GATEWAY_MAX_CLIENTS
+#define MY_GATEWAY_MAX_CLIENTS (1u)
+#endif
+
+
+/**
+ * @def GATEWAY_ADDRESS
+ * @brief NODE_ID = 0 for gateway
+ */
+#ifndef GATEWAY_ADDRESS
+#define GATEWAY_ADDRESS (0u)
+#endif
+
+
 /***
  * Wave Message Types
  * This types determine what message is transmited through the network
@@ -30,6 +75,7 @@
 #define NOTIF_MSG_T             68
 #define SYNCHRONIZE_MSG_T       69
 #define ACK_SYNCHRONIZE_MSG_T   70
+#define MY_MESSAGE_T            71
 
 /**
  * \defgroup defConfig Library config
@@ -60,7 +106,7 @@ typedef struct{
 
 // typedef struct{
 //   char myMessage[MY_GATEWAY_MAX_SEND_LENGTH];
-// }notif_msg_t;
+// }mysensor_msg_t;
 
 typedef struct{
   uint8_t destID;
@@ -137,6 +183,11 @@ class RF24Wave
     bool isPresent(uint8_t NID, uint8_t GID);
     void printAssociation(info_node_t data);
     uint8_t countGroups(uint8_t *groups);
+    MyMessage& build(MyMessage &msg, const uint8_t NID, const uint8_t destID, const uint8_t childID,
+                      const uint8_t command, const uint8_t type, const bool ack);
+    uint8_t protocolH2i(char c);
+    bool protocolParse(MyMessage &message, char *inputString);
+    char* protocolFormat(MyMessage &message);
 
 #if !defined(WAVE_MASTER)
 /***************************** Node functions *******************************/
@@ -157,7 +208,9 @@ class RF24Wave
     void printUpdate(update_msg_t data);
     void addNodeToBroadcastList(uint8_t NID);
     void createBroadcastList();
-
+    void sendMyMessage(MyMessage &message, uint8_t destID);
+    void sendSketchInfo(const uint8_t CID, const char *name, const char *version);
+    void present(const uint8_t childId, const uint8_t sensorType, const char *description = "");
 #else
 /***************************** Master functions *****************************/
     bool checkAssociations(info_node_t *data);
@@ -166,12 +219,19 @@ class RF24Wave
     bool sendUpdateGroup(uint8_t NID, uint8_t GID, uint8_t *listNID);
     void sendSynchronizedList(info_node_t msg);
     void printNetwork();
+    MyMessage& buildGw(MyMessage &msg, const uint8_t type);
+    void gatewayTransportSend(MyMessage &message);
+    void gatewayTransportInit();
 
 #endif
 
   private:
     RF24Mesh& mesh;
     RF24Network& network;
+    // global variables
+    MyMessage _msgTmp;
+    char _fmtBuffer[MY_GATEWAY_MAX_SEND_LENGTH];
+    char _convBuffer[MAX_PAYLOAD*2+1];
 #if !defined(WAVE_MASTER)
     bool associated = false;
     bool synchronized = false;
