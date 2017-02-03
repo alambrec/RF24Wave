@@ -19,10 +19,6 @@
 #define MSG_GW_STARTUP_COMPLETE "Gateway startup complete."
 #define LIBRARY_VERSION "RF24Wave 1.0"
 
-// #undef PSTR
-// // #define PSTR(s) ((const PROGMEM char *)(s))
-// #define PSTR(x) (x)
-
 /**********************************
 *  Gateway config
 ***********************************/
@@ -32,7 +28,7 @@
  * @brief Max buffersize needed for messages coming from controller.
  */
 #ifndef MY_GATEWAY_MAX_RECEIVE_LENGTH
-#define MY_GATEWAY_MAX_RECEIVE_LENGTH (100u) //100
+#define MY_GATEWAY_MAX_RECEIVE_LENGTH (60u) //100
 #endif
 
 /**
@@ -40,7 +36,7 @@
  * @brief Max buffer size when sending messages.
  */
 #ifndef MY_GATEWAY_MAX_SEND_LENGTH
-#define MY_GATEWAY_MAX_SEND_LENGTH (120u) //120
+#define MY_GATEWAY_MAX_SEND_LENGTH (60u) //120
 #endif
 
 /**
@@ -208,8 +204,9 @@ class RF24Wave
     void printUpdate(update_msg_t data);
     void addNodeToBroadcastList(uint8_t NID);
     void createBroadcastList();
+    void send(MyMessage &message);
     void sendMyMessage(MyMessage &message, uint8_t destID);
-    void sendSketchInfo(const uint8_t CID, const char *name, const char *version);
+    void sendSketchInfo(const char *name, const char *version);
     void present(const uint8_t childId, const uint8_t sensorType, const char *description = "");
 #else
 /***************************** Master functions *****************************/
