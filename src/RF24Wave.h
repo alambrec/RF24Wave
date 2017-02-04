@@ -19,6 +19,24 @@
 #define MSG_GW_STARTUP_COMPLETE "Gateway startup complete."
 #define LIBRARY_VERSION "RF24Wave 1.0"
 
+
+#ifdef WAVE_DEBUG
+#define P_DEBUG(x) Serial.println(F(x));
+#else
+#define P_DEBUG(x)
+#endif
+
+#ifdef WAVE_DEBUG
+#define D_DEBUG(x) Serial.println(x);
+#else
+#define D_DEBUG(x)
+#endif
+
+#ifdef WAVE_DEBUG
+#define F_DEBUG(x) x;
+#else
+#define F_DEBUG(x)
+#endif
 /**********************************
 *  Gateway config
 ***********************************/
@@ -100,28 +118,6 @@ typedef struct{
   uint8_t groupsID[MAX_GROUPS];
 }info_node_t;
 
-// typedef struct{
-//   char myMessage[MY_GATEWAY_MAX_SEND_LENGTH];
-// }mysensor_msg_t;
-
-typedef struct{
-  uint8_t destID;
-  uint8_t tSensor;
-  uint8_t tValue;
-  uint8_t tPayload;
-  union {
-		uint8_t bValue;
-		uint16_t uiValue;
-		int16_t iValue;
-		uint32_t ulValue;
-		int32_t lValue;
-		struct { // Float messages
-			float fValue;
-			uint8_t fPrecision;   // Number of decimals when serializing
-		};
-	} payload;
-}notif_msg_t;
-
 typedef struct{
   uint8_t nodeID;
   uint8_t groupID;
@@ -166,7 +162,7 @@ class RF24Wave
      * @param NodeID The NodeID associated to node (0 for master)
      * @param groups Tab of groups associated to this node (null for master)
      */
-    RF24Wave(RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID=0, uint8_t *groups=NULL);
+    RF24Wave(RF24& _radio, RF24Network& _network, RF24Mesh& _mesh, uint8_t NodeID=0, uint8_t *groups=NULL);
 
 /***************************** Common functions *****************************/
     void begin();
@@ -194,13 +190,11 @@ class RF24Wave
     void requestSynchronize();
     void confirmSynchronize();
     void receiveSynchronizedList(send_list_t msg);
-    //void broadcastNotifications(MyMessage &message);
-    void broadcastNotifications(notif_msg_t data);
+    void broadcastNotifications(MyMessage &message);
     void sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
       mysensor_payload tPayload, int16_t payload);
     void sendNotifications(mysensor_sensor tSensor, mysensor_data tValue,
       mysensor_payload tPayload, int32_t payload);
-    void printNotification(notif_msg_t data);
     void printUpdate(update_msg_t data);
     void addNodeToBroadcastList(uint8_t NID);
     void createBroadcastList();
@@ -223,12 +217,17 @@ class RF24Wave
 #endif
 
   private:
-    RF24Mesh& mesh;
+    RF24& radio;
     RF24Network& network;
+    RF24Mesh& mesh;
     // global variables
     MyMessage _msgTmp;
     char _fmtBuffer[MY_GATEWAY_MAX_SEND_LENGTH];
     char _convBuffer[MAX_PAYLOAD*2+1];
+    info_node_t info_payload;
+    update_msg_t update_payload;
+    send_list_t list_payload;
+
 #if !defined(WAVE_MASTER)
     bool associated = false;
     bool synchronized = false;
