@@ -43,8 +43,11 @@ void RF24Wave::begin()
   mesh.setNodeID(nodeID);
   nodeID = mesh.getNodeID();
   P_DEBUG("Connecting to the mesh...");
-  mesh.begin(100, RF24_250KBPS);
-  // radio.setPALevel(RF24_PA_LOW);
+  mesh.begin(110, RF24_250KBPS);
+  //mesh.begin();
+#if defined(AMPLIFICATOR)
+  radio.setPALevel(RF24_PA_LOW);
+#endif
   lastTimer = millis();
   resetListGroup();
   P_DEBUG("Connecting to the wave...");
@@ -65,10 +68,21 @@ void RF24Wave::listen(){
     RF24NetworkHeader header;
     network.peek(header);
     switch(header.type){
+      case MY_MESSAGE_T:
+        P_DEBUG("[listen] MY_MESSAGE_T")
+        network.read(header, _fmtBuffer, MY_GATEWAY_MAX_SEND_LENGTH);
+        Serial.print(_fmtBuffer);
+#if !defined(WAVE_MASTER)
+        if(protocolParse(_msgTmp, _fmtBuffer)){
+          P_DEBUG("[MY_MESSAGE_T] parse ok !")
+          receive(_msgTmp);
+        }
+#endif
+        break;
 #if defined(WAVE_MASTER)
       case CONNECT_MSG_T:
         memset(&info_payload, 0, sizeof(info_node_t));
-        network.read(header, &info_payload, sizeof(info_payload));
+        network.read(header, &info_payload, sizeof(info_node_t));
         F_DEBUG(printAssociation(info_payload))
         if(checkAssociations(&info_payload)){
           P_DEBUG("[listen] broadcastAssociations")
@@ -81,21 +95,14 @@ void RF24Wave::listen(){
       case SYNCHRONIZE_MSG_T:
         memset(&info_payload, 0, sizeof(info_node_t));
         P_DEBUG("[listen] SYNCHRONIZE_MSG_T")
-        network.read(header, &info_payload, sizeof(info_payload));
+        network.read(header, &info_payload, sizeof(info_node_t));
         P_DEBUG("[listen] sendSynchronizedList")
         sendSynchronizedList(info_payload);
         break;
-      case MY_MESSAGE_T:
-        P_DEBUG("[listen] MY_MESSAGE_T")
-        network.read(header, _fmtBuffer, MY_GATEWAY_MAX_SEND_LENGTH);
-        Serial.print(_fmtBuffer);
-        if(protocolParse(_msgTmp, _fmtBuffer)){
-          P_DEBUG("[MY_MESSAGE_T] parse ok !")
-        }
 #else
       case UPDATE_MSG_T:
         memset(&update_payload, 0, sizeof(update_msg_t));
-        network.read(header, &update_payload, sizeof(update_payload));
+        network.read(header, &update_payload, sizeof(update_msg_t));
         printUpdate(update_payload);
         addAssociation(update_payload.nodeID, update_payload.groupID);
         printAssociations();
@@ -105,6 +112,17 @@ void RF24Wave::listen(){
         break;
     }
   }
+
+#if defined(WAVE_SERIAL_RECEIVE)
+  if (gatewayTransportAvailable()){
+    //memset(_fmtBuffer, 0, sizeof(MY_GATEWAY_MAX_SEND_LENGTH));
+    mesh.update();
+    mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, 1);
+    if (_msgTmp.destination != GATEWAY_ADDRESS) {
+      transmitMyMessage(_msgTmp, _msgTmp.destination);
+    }
+  }
+#endif
 }
 
 void RF24Wave::resetListGroup(){
@@ -333,7 +351,7 @@ bool RF24Wave::requestAssociations()
   }
   printAssociation(info_payload);
   mesh.update();
-  if(!mesh.write(&info_payload, CONNECT_MSG_T, sizeof(info_node_t), 0)){
+  if(!mesh.write(&info_payload, CONNECT_MSG_T, sizeof(info_node_t))){
     // Serial.println(F("[requestAssociations] ERROR: Unable to send data"));
     // If a write fails, check connectivity to the mesh network
     if(!mesh.checkConnection()){
@@ -360,6 +378,8 @@ bool RF24Wave::confirmAssociations()
         //Serial.println(F("[confirmAssociations] INFO ACK_INIT_MSG_T BEGIN"));
         memset(&info_payload, 0, sizeof(info_node_t));
         network.read(header, &info_payload, sizeof(info_node_t));
+        P_DEBUG("[confirmAssociations] Received payload")
+        F_DEBUG(printAssociation(info_payload))
         if(info_payload.nodeID != nodeID){
           Serial.println(F("[confirmAssociations] ERROR nodeID"));
           available = false;
@@ -434,7 +454,7 @@ void RF24Wave::requestSynchronize(){
   }
   mesh.update();
   Serial.println(F("[requestSynchronize] Send request"));
-  if(!mesh.write(&info_payload, SYNCHRONIZE_MSG_T, sizeof(info_node_t), 0)){
+  if(!mesh.write(&info_payload, SYNCHRONIZE_MSG_T, sizeof info_payload, 0)){
     Serial.println(F("[requestSynchronize] Send failed"));
     // If a write fails, check connectivity to the mesh network
     if(!mesh.checkConnection()){
@@ -449,30 +469,6 @@ void RF24Wave::requestSynchronize(){
 void RF24Wave::send(MyMessage &message){
   mSetCommand(message, C_SET);
   sendMyMessage(message, GATEWAY_ADDRESS);
-}
-
-void RF24Wave::sendMyMessage(MyMessage &message, uint8_t destID)
-{
-  bool send = false;
-  message.sender = nodeID;
-  // mSetCommand(message, C_SET);
-  protocolFormat(message);
-  Serial.println(F("[sendMyMessage] Data send :"));
-  Serial.print(_fmtBuffer);
-  //mesh.update();
-  //send = mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, destID);
-  while(!send){
-    uint32_t currentTimer = millis();
-    mesh.update();
-    if(currentTimer - lastTimer > 2000){
-      lastTimer = currentTimer;
-      //mesh.update();
-      send = mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, destID);
-      if(!send){
-        Serial.println(F("[sendMyMessage] Unable to send notification - Retry "));
-      }
-    }
-  }
 }
 
 void RF24Wave::broadcastNotifications(MyMessage &message)
@@ -569,6 +565,35 @@ void RF24Wave::present(const uint8_t childId, const uint8_t sensorType, const ch
   sendMyMessage(build(_msgTmp, nodeID, GATEWAY_ADDRESS, childId, C_PRESENTATION, sensorType, false).set(description), 0);
 }
 
+void RF24Wave::sendMyMessage(MyMessage &message, uint8_t destID)
+{
+  bool send = false;
+  uint8_t retry;
+  message.sender = nodeID;
+  // mSetCommand(message, C_SET);
+  protocolFormat(message);
+  P_DEBUG("[sendMyMessage] Data send :");
+#if !defined(WAVE_MASTER) && defined(WAVE_DEBUG)
+  Serial.print(_fmtBuffer);
+#endif
+  //mesh.update();
+  //send = mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, destID);
+  retry = 0;
+  while(!send && (retry < NB_RETRY_SEND)){
+    uint32_t currentTimer = millis();
+    mesh.update();
+    if(currentTimer - lastTimer > 2000){
+      lastTimer = currentTimer;
+      mesh.update();
+      send = mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, destID);
+      if(!send){
+        Serial.println(F("[sendMyMessage] Unable to send notification - Retry "));
+      }
+      retry++;
+    }
+  }
+}
+
 #else
 /***************************** Master functions *****************************/
 
@@ -578,13 +603,16 @@ bool RF24Wave::checkAssociations(info_node_t *data)
   bool available = true;
   for(i=0; i<MAX_GROUPS; i++){
     if(!checkGroup(data->nodeID, data->groupsID[i])){
-      Serial.println(F("[ERROR] Unable group!"));
+      Serial.println(F("[checkAssociations] ERROR Unable group!"));
       available = false;
       data->groupsID[i] = 0;
     }
   }
+  P_DEBUG("[checkAssociations] DEBUG Data before send")
+  F_DEBUG(printAssociation(*data))
+  mesh.update();
   if(!mesh.write(data, ACK_CONNECT_MSG_T, sizeof(info_node_t), data->nodeID)){
-    Serial.println(F("[ERROR] unable to send response!"));
+    Serial.println(F("[checkAssociations] ERROR unable to send response!"));
   }
   return available;
 }
@@ -697,6 +725,32 @@ void RF24Wave::gatewayTransportInit()
 	//presentNode();
 }
 
+bool RF24Wave::gatewayTransportAvailable(void)
+{
+  char inChar;
+	while (Serial.available()) {
+		// get the new byte:
+		inChar = (char)Serial.read();
+		// if the incoming character is a newline, set a flag
+		// so the main loop can do something about it:
+		if (_serialInputPos < MY_GATEWAY_MAX_RECEIVE_LENGTH - 1) {
+			if (inChar == '\n') {
+				_fmtBuffer[_serialInputPos] = 0;
+        _serialInputPos = 0;
+				return protocolParse(_msgTmp, _fmtBuffer);
+			} else {
+				// add it to the inputString:
+				_fmtBuffer[_serialInputPos] = inChar;
+				_serialInputPos++;
+			}
+		} else {
+			// Incoming message too long. Throw away
+			_serialInputPos = 0;
+		}
+	}
+	return false;
+}
+
 MyMessage& RF24Wave::buildGw(MyMessage &msg, const uint8_t type)
 {
 	msg.sender = GATEWAY_ADDRESS;
@@ -712,6 +766,22 @@ MyMessage& RF24Wave::buildGw(MyMessage &msg, const uint8_t type)
 void RF24Wave::gatewayTransportSend(MyMessage &message)
 {
 	Serial.print(protocolFormat(message));
+}
+
+MyMessage& RF24Wave::gatewayTransportReceive()
+{
+	// Return the last parsed message
+	return _msgTmp;
+}
+
+void RF24Wave::transmitMyMessage(MyMessage &message, uint8_t destID)
+{
+  message.sender = nodeID;
+  protocolFormat(message);
+  mesh.update();
+  if(!mesh.write(_fmtBuffer, MY_MESSAGE_T, MY_GATEWAY_MAX_SEND_LENGTH, destID)){
+    Serial.println(F("[sendMyMessage] Unable to send notification - Retry "));
+  }
 }
 
 #endif

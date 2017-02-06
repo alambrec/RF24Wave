@@ -18,7 +18,7 @@
 
 #define MSG_GW_STARTUP_COMPLETE "Gateway startup complete."
 #define LIBRARY_VERSION "RF24Wave 1.0"
-
+#define NB_RETRY_SEND 10
 
 #ifdef WAVE_DEBUG
 #define P_DEBUG(x) Serial.println(F(x));
@@ -37,6 +37,7 @@
 #else
 #define F_DEBUG(x)
 #endif
+
 /**********************************
 *  Gateway config
 ***********************************/
@@ -105,6 +106,8 @@
 #define PRINT_DELAY             5000
 
  /** @} */
+
+void receive(const MyMessage &message)  __attribute__((weak));
 
 /**
  * \struct info_node_t
@@ -181,6 +184,7 @@ class RF24Wave
     bool protocolParse(MyMessage &message, char *inputString);
     char* protocolFormat(MyMessage &message);
 
+
 #if !defined(WAVE_MASTER)
 /***************************** Node functions *******************************/
     void connect();
@@ -199,9 +203,10 @@ class RF24Wave
     void addNodeToBroadcastList(uint8_t NID);
     void createBroadcastList();
     void send(MyMessage &message);
-    void sendMyMessage(MyMessage &message, uint8_t destID);
     void sendSketchInfo(const char *name, const char *version);
     void present(const uint8_t childId, const uint8_t sensorType, const char *description = "");
+    void sendMyMessage(MyMessage &message, uint8_t destID);
+
 #else
 /***************************** Master functions *****************************/
     bool checkAssociations(info_node_t *data);
@@ -213,6 +218,9 @@ class RF24Wave
     MyMessage& buildGw(MyMessage &msg, const uint8_t type);
     void gatewayTransportSend(MyMessage &message);
     void gatewayTransportInit();
+    bool gatewayTransportAvailable();
+    MyMessage& gatewayTransportReceive();
+    void transmitMyMessage(MyMessage &message, uint8_t destID);
 
 #endif
 
@@ -235,6 +243,8 @@ class RF24Wave
     uint8_t groupsID[MAX_GROUPS];
     broadcast_list_t *headBroadcastList = NULL;
     uint8_t lengthBroadcastList = 0;
+#else
+    uint8_t _serialInputPos;
 #endif
     uint8_t nodeID;
     /* Matrix to stock nodeID for each different groupID */
